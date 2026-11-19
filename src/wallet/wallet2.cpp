@@ -3414,22 +3414,21 @@ std::vector<wallet2::get_pool_state_tx> wallet2::get_pool_state(bool refreshed)
         LOG_PRINT_L1("Pending txid " << txid << " not in pool, marking as failed");
         pit->second.m_state = wallet2::unconfirmed_transfer_details::failed;
 
-        // the inputs aren't spent anymore, since the tx failed
-        for (size_t vini = 0; vini < pit->second.m_tx.vin.size(); ++vini)
+        // Release inputs reserved by the failed transaction.
+        for (const auto& in : pit->second.m_tx.vin)
         {
-          if (std::holds_alternative<txin_to_key>(pit->second.m_tx.vin[vini]))
+          if (!std::holds_alternative<txin_to_key>(in) && !std::holds_alternative<txin_zy_input>(in))
+            continue;
+
+          const auto input_it = m_key_images.find(get_input_key_image(in));
+          if (input_it == m_key_images.end())
+            continue;
+
+          const auto& td = m_transfers[input_it->second];
+          if (td.m_spent && td.m_spent_height == 0)
           {
-            txin_to_key &tx_in_to_key = var::get<txin_to_key>(pit->second.m_tx.vin[vini]);
-            for (size_t i = 0; i < m_transfers.size(); ++i)
-            {
-              const transfer_details &td = m_transfers[i];
-              if (td.m_key_image == tx_in_to_key.k_image)
-              {
-                 LOG_PRINT_L1("Resetting spent status for output " << vini << ": " << td.m_key_image);
-                 set_unspent(i);
-                 break;
-              }
-            }
+            LOG_PRINT_L1("Resetting spent status for output " << input_it->second << ": " << td.m_key_image);
+            set_unspent(input_it->second);
           }
         }
       }
