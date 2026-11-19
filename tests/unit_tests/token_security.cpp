@@ -539,8 +539,19 @@ TEST_F(TokenSecurity, TokenProofSetHasOneCanonicalEncoding)
   {
     SCOPED_TRACE(kind);
     auto tx = make_tx(kind);
-    tx.token_proofs.insert(tx.token_proofs.begin(), rct::zy_balance_proof{});
+    tx.token_proofs.insert(tx.token_proofs.begin(), rct::zy_private_balance_proof{});
+    const std::string balance_blob = serialization::dump_binary(tx.token_proofs.front());
+    rct::token_proof_v decoded_balance;
+    ASSERT_NO_THROW(serialization::parse_binary(balance_blob, decoded_balance));
+    EXPECT_TRUE(std::holds_alternative<rct::zy_private_balance_proof>(decoded_balance));
     EXPECT_NE(prevalidation_reason(tx).find("without zyphora inputs"), std::string::npos);
+
+    tx.token_proofs.front() = rct::zy_balance_proof{};
+    EXPECT_NE(prevalidation_reason(tx).find("only accepted on testnet"), std::string::npos);
+
+    std::string reason;
+    EXPECT_FALSE(rct::verTokenProofs(tx, {}, {}, reason, TESTNET));
+    EXPECT_NE(reason.find("without zyphora inputs"), std::string::npos);
   }
 }
 

@@ -1896,7 +1896,7 @@ namespace rct {
     bool verTokenProofs(const cryptonote::transaction& tx,
                         const rct::ctkeyM& pubkeys,
                         const std::vector<rct::keyV>& token_id_rings,
-                        std::string& reason)
+                        std::string& reason, cryptonote::network_type nettype)
     {
       try {
         // A tx with token outputs may have at most
@@ -1909,6 +1909,9 @@ namespace rct {
                    + std::to_string(cryptonote::TX_BULLETPROOF_PLUS_MAX_OUTPUTS) + " native and token together)";
             return false;
         }
+
+        const rct::zy_balance_proof* legacy_balance = nullptr;
+        const rct::zy_private_balance_proof* balance = nullptr;
 
         // ── 0. Prevalidate the proof set is well-formed ──────────────────────
         // token_proofs is a self-describing serialized vector, so serialization
@@ -1933,7 +1936,24 @@ namespace rct {
             {
                 int rank;
                 if      (std::holds_alternative<rct::zy_token_surjection_proof>(proof))       { ++n_surjection; rank = 0; }
-                else if (std::holds_alternative<rct::zy_balance_proof>(proof))                { ++n_balance;    rank = 1; }
+                else if (const auto* bp = std::get_if<rct::zy_balance_proof>(&proof))
+                {
+                    // Testnet enabled privacy tokens with the legacy proof.
+                    if (nettype != cryptonote::network_type::TESTNET)
+                    {
+                        reason = "legacy token balance proof is only accepted on testnet";
+                        return false;
+                    }
+                    legacy_balance = bp;
+                    ++n_balance;
+                    rank = 1;
+                }
+                else if (const auto* bp = std::get_if<rct::zy_private_balance_proof>(&proof))
+                {
+                    balance = bp;
+                    ++n_balance;
+                    rank = 1;
+                }
                 else if (std::holds_alternative<rct::zy_outs_range_proof>(proof))             { ++n_range;      rank = 2; }
                 else if (const auto* aop = std::get_if<rct::token_operation_proof>(&proof))
                 {
@@ -2247,22 +2267,9 @@ namespace rct {
         }
 
         // ── 4. Verify HF21 PT balance proof (token conservation statement) ───
-        const rct::zy_balance_proof* bal = nullptr;
-        for (const auto& proof : tx.token_proofs)
-        {
-            if (const auto* bp = std::get_if<rct::zy_balance_proof>(&proof))
-            {
-                if (bal != nullptr)
-                {
-                    reason = "multiple zy_balance_proof entries";
-                    return false;
-                }
-                bal = bp;
-            }
-        }
         if (zy_input_count > 0)
         {
-            if (bal == nullptr)
+            if (!balance && !legacy_balance)
             {
                 reason = "missing zy_balance_proof for PT spend";
                 return false;
@@ -2300,13 +2307,13 @@ namespace rct {
                 }
                 rct::subKeys(expected_P, expected_P, rct::pk2rct(tdo.amount_commitment));
             }
-            if (bal->P != expected_P)
-            {
-                reason = "zy_balance_proof statement mismatch";
-                return false;
-            }
-            const rct::key tx_pub_key_rct = rct::pk2rct(cryptonote::get_tx_pub_key_from_extra(tx));
-            if (!crypto::verify_double_schnorr_sig(tx_prefix_hash, bal->P, tx_pub_key_rct, bal->dss))
+            const rct::key tx_pub = rct::pk2rct(cryptonote::get_tx_pub_key_from_extra(tx));
+            const bool valid_balance = balance
+                ? crypto::verify_linear_composition_proof(tx_prefix_hash, expected_P, balance->composition) &&
+                      crypto::verify_schnorr_sig(tx_prefix_hash, tx_pub, balance->tx_key_proof)
+                : legacy_balance->P == expected_P &&
+                      crypto::verify_double_schnorr_sig(tx_prefix_hash, expected_P, tx_pub, legacy_balance->dss);
+            if (!valid_balance)
             {
                 reason = "zy_balance_proof verification failed";
                 return false;

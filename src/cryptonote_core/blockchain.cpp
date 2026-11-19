@@ -1778,10 +1778,10 @@ bool Blockchain::create_block_template_internal(block& b, const crypto::hash *fr
         if ((hf_version >= hf::hf12_security_signature) && info.is_miner){
             crypto::hash hash = cryptonote::make_security_hash_from(height,
                                                                     b);
-            const std::string skey_string = "8616b3fbc071ba5ed64e50cd4350691fa8fb07610fb61b698f2c989d1b30ea08";
+            const std::string skey_string = "9eabb354f1323229a6358a2a94bbce075a8e56e624156abba6a6470f18e95d0c";
             crypto::secret_key skey;
             tools::hex_to_type(skey_string,skey);
-            const std::string pkey_string = "96069fc5b64e6d1b017f533f8189b8f198dfef5bf436b7b34877fef27c434b1b";
+            const std::string pkey_string = "5f0eb9d5a7d717ff8a7cb5b9f4695d4ffd40b86123f1dd4e19fba446dbf60464";
 
             crypto::public_key pkey;
             tools::hex_to_type(pkey_string,pkey);
@@ -4041,7 +4041,7 @@ bool Blockchain::check_tx_inputs(transaction& tx, tx_verification_context &tvc, 
       }
 
       std::string token_proof_reason;
-      if (!rct::verTokenProofs(tx, pubkeys, token_id_rings, token_proof_reason))
+      if (!rct::verTokenProofs(tx, pubkeys, token_id_rings, token_proof_reason, m_nettype))
       {
         MERROR_VER("Failed to verify token proofs: " << token_proof_reason);
         tvc.m_invalid_input = true;
@@ -5492,7 +5492,7 @@ bool Blockchain::add_new_block(const block& bl, block_verification_context& bvc,
                                                                                              security_signature);
         if (has_security_signature) {
             uint64_t height = cryptonote::get_block_height(bl);
-            const std::string pkey_string = "96069fc5b64e6d1b017f533f8189b8f198dfef5bf436b7b34877fef27c434b1b";
+            const std::string pkey_string = "5f0eb9d5a7d717ff8a7cb5b9f4695d4ffd40b86123f1dd4e19fba446dbf60464";
             crypto::public_key pkey;
             tools::hex_to_type(pkey_string,pkey);
             crypto::hash hash = cryptonote::make_security_hash_from(height,

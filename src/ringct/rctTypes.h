@@ -731,6 +731,16 @@ namespace rct {
       BEGIN_SERIALIZE_OBJECT() FIELD(P) FIELD(dss) END_SERIALIZE()
     };
 
+    struct zy_private_balance_proof
+    {
+      crypto::linear_composition_proof_s composition;
+      crypto::schnorr_sig_s tx_key_proof;
+      BEGIN_SERIALIZE_OBJECT()
+        FIELD(composition)
+        FIELD(tx_key_proof)
+      END_SERIALIZE()
+    };
+
     struct token_operation_proof
     {
       // flags: bit 0 = composition_proof present
@@ -795,7 +805,8 @@ namespace rct {
       zy_balance_proof,
       token_operation_proof,
       token_operation_ownership_proof,
-      zy_outs_range_proof
+      zy_outs_range_proof,
+      zy_private_balance_proof
     >;
 
     // HF21: transaction signature variant, modeled on Zano's signature_v.
@@ -817,3 +828,4 @@ VARIANT_TAG(rct::token_operation_ownership_proof, "token_owner",   0xb3);
 // token_proof_v member; its tag lets it serialize as { "ZY_sig": {...} }.
 VARIANT_TAG(rct::ZY_sig,                          "ZY_sig",        0xb4);
 VARIANT_TAG(rct::zy_outs_range_proof,             "zy_range_proof",0xb5);
+VARIANT_TAG(rct::zy_private_balance_proof,        "zy_private_balance", 0xb6);

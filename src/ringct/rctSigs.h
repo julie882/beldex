@@ -86,7 +86,8 @@ namespace rct {
     bool verTokenProofs(const cryptonote::transaction& tx,
                         const rct::ctkeyM& pubkeys,   // ring pubkeys per input
                         const std::vector<rct::keyV>& token_id_rings, // blinded token id ring per input (only populated for txin_zy_input entries)
-                        std::string& reason);
+                        std::string& reason,
+                        cryptonote::network_type nettype = cryptonote::network_type::MAINNET);
 
     // HF21: 3-layer CLSAG-GGX, the ring signature used by ZY_sig to spend a
     // tx_out_zyphora. Proves, for one real ring index l, all of:

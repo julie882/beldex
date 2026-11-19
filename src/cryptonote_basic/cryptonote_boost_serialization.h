@@ -502,6 +502,12 @@ namespace boost
     a & x.dss;
   }
   template <class Archive>
+  inline void serialize(Archive &a, rct::zy_private_balance_proof &x, const boost::serialization::version_type ver)
+  {
+    a & x.composition;
+    a & x.tx_key_proof;
+  }
+  template <class Archive>
   inline void serialize(Archive &a, rct::token_operation_proof &x, const boost::serialization::version_type ver)
   {
     a & x.flags;
