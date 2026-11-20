@@ -10371,6 +10371,16 @@ std::pair<std::set<uint64_t>, size_t> outs_unique(const std::vector<std::vector<
 void wallet2::get_outs(std::vector<std::vector<tools::wallet2::get_outs_entry>> &outs, const std::vector<size_t> &selected_transfers, size_t fake_outputs_count, bool has_rct)
 {
   std::vector<uint64_t> rct_offsets;
+  std::vector<crypto::key_image> retry_key_images;
+  for (size_t index : selected_transfers)
+  {
+    const auto &td = m_transfers.at(index);
+    std::vector<uint64_t> ring;
+    if (m_light_wallet || !td.m_key_image_known || td.m_key_image_partial ||
+        !get_ring(td.m_key_image, ring) || ring.size() <= 1)
+      retry_key_images.push_back(td.m_key_image);
+  }
+
   for (size_t attempts = 3; attempts > 0; --attempts)
   {
     get_outs(outs, selected_transfers, fake_outputs_count, rct_offsets, has_rct);
@@ -10381,12 +10391,9 @@ void wallet2::get_outs(std::vector<std::vector<tools::wallet2::get_outs_entry>> 
       return;
     }
 
-    std::vector<crypto::key_image> key_images;
-    key_images.reserve(selected_transfers.size());
-    std::for_each(selected_transfers.begin(), selected_transfers.end(), [this, &key_images](size_t index) {
-      key_images.push_back(m_transfers[index].m_key_image);
-    });
-    unset_ring(key_images);
+    // Keep rings saved before this attempt, since a prior transaction may have exposed them.
+    if (!retry_key_images.empty())
+      unset_ring(retry_key_images);
   }
 
   THROW_WALLET_EXCEPTION(error::wallet_internal_error, tr("Transaction sanity check failed"));
@@ -10968,28 +10975,6 @@ void wallet2::get_outs(std::vector<std::vector<tools::wallet2::get_outs_entry>> 
                 td.m_tx.vout[td.m_internal_output_index].target).blinded_token_id
           : crypto::null_tid;
 
-      uint64_t num_outs = 0;
-      const uint64_t amount = td.is_rct() ? 0 : td.amount();
-      const bool output_is_pre_fork = td.m_block_height < segregation_fork_height;
-      if (is_after_segregation_fork && m_segregate_pre_fork_outputs && output_is_pre_fork)
-        num_outs = segregation_limit[amount].first;
-      else for (const auto &he: res["histogram"])
-      {
-        if (he["amount"].get<uint64_t>() == amount)
-        {
-          num_outs = he["unlocked_instances"].get<uint64_t>();
-          break;
-        }
-      }
-      bool use_histogram = amount != 0 || !has_rct_distribution;
-      if (!use_histogram)
-      {
-        const bool spending_token = td.is_zyphora();
-        auto *picker = spending_token ? gamma_token_picker.get() : gamma_native_picker.get();
-        THROW_WALLET_EXCEPTION_IF(!picker, error::wallet_internal_error, "No gamma picker for spend type");
-        num_outs = picker->get_num_rct_outs();
-      }
-
       // make sure the real outputs we asked for are really included, along
       // with the correct key and mask: this guards against an active attack
       // where the node sends dummy data for all outputs, and we then send
@@ -11019,27 +11004,28 @@ void wallet2::get_outs(std::vector<std::vector<tools::wallet2::get_outs_entry>> 
         std::vector<uint64_t> ring;
         if (get_ring(get_ringdb_key(), td.m_key_image, ring))
         {
+          THROW_WALLET_EXCEPTION_IF(ring.size() > fake_outputs_count + 1, error::wallet_internal_error,
+              "Saved ring is larger than the requested ring");
+          THROW_WALLET_EXCEPTION_IF(std::find(ring.begin(), ring.end(), td.m_global_output_index) == ring.end(),
+              error::wallet_internal_error, "Saved ring does not include the real output");
           for (uint64_t out: ring)
           {
-            if (out < num_outs)
+            if (out == td.m_global_output_index)
+              continue;
+
+            // The request and the saved ring both contain global output indices.
+            bool added = false;
+            for (size_t i = base; i < base + requested_outputs_count; ++i)
             {
-              if (out != td.m_global_output_index)
-              {
-                bool found = false;
-                for (size_t o = 0; o < requested_outputs_count; ++o)
-                {
-                  size_t i = base + o;
-                  if (get_outputs[i].index == out)
-                  {
-                    LOG_PRINT_L2("Index " << i << "/" << requested_outputs_count << ": idx " << get_outputs[i].index << " (real " << td.m_global_output_index << "), unlocked " << got_outs[i].unlocked << ", key " << got_outs[i].key << " (from existing ring)");
-                    tx_add_fake_output(outs, get_outputs[i].index, got_outs[i].key, got_outs[i].mask, td.m_global_output_index, got_outs[i].unlocked, got_outs[i].blinded_token_id);
-                    found = true;
-                    break;
-                  }
-                }
-                THROW_WALLET_EXCEPTION_IF(!found, error::wallet_internal_error, "Falied to find existing ring output in daemon out data");
-              }
+              if (get_outputs[i].index != out)
+                continue;
+
+              added = tx_add_fake_output(outs, out, got_outs[i].key, got_outs[i].mask,
+                  td.m_global_output_index, got_outs[i].unlocked, got_outs[i].blinded_token_id);
+              break;
             }
+            THROW_WALLET_EXCEPTION_IF(!added, error::wallet_internal_error,
+                "Saved ring member is unavailable: " + std::to_string(out));
           }
         }
       }

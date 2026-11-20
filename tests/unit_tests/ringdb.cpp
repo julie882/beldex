@@ -122,6 +122,33 @@ TEST(ringdb, convert)
   ASSERT_EQ(outs2[2], 43+7320+8429);
 }
 
+TEST(ringdb, mixed_transaction_rings)
+{
+  RingDB ringdb;
+  const auto &key = get_context().KEY_1;
+
+  cryptonote::txin_to_key native{};
+  native.k_image = generate_key_image();
+  native.key_offsets = {3, 8, 21};
+  cryptonote::txin_zy_input token{};
+  token.k_image = generate_key_image();
+  token.key_offsets = {5, 12, 27};
+
+  cryptonote::transaction_prefix tx;
+  tx.vin = {native, token};
+  ASSERT_TRUE(ringdb.add_rings(key, tx));
+
+  std::vector<uint64_t> outs;
+  ASSERT_TRUE(ringdb.get_ring(key, native.k_image, outs));
+  EXPECT_EQ(outs, (std::vector<uint64_t>{3, 11, 32}));
+  ASSERT_TRUE(ringdb.get_ring(key, token.k_image, outs));
+  EXPECT_EQ(outs, (std::vector<uint64_t>{5, 17, 44}));
+
+  ASSERT_TRUE(ringdb.remove_rings(key, tx));
+  EXPECT_FALSE(ringdb.get_ring(key, native.k_image, outs));
+  EXPECT_FALSE(ringdb.get_ring(key, token.k_image, outs));
+}
+
 TEST(ringdb, different_genesis)
 {
   RingDB ringdb;

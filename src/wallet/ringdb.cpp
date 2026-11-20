@@ -33,6 +33,7 @@
 #include "wallet_errors.h"
 #include "ringdb.h"
 #include "cryptonote_config.h"
+#include "cryptonote_basic/cryptonote_format_utils.h"
 
 #undef BELDEX_DEFAULT_LOG_CATEGORY
 #define BELDEX_DEFAULT_LOG_CATEGORY "wallet.ringdb"
@@ -156,6 +157,15 @@ static void store_relative_ring(MDB_txn *txn, MDB_dbi &dbi, const crypto::key_im
   THROW_WALLET_EXCEPTION_IF(dbr, tools::error::wallet_internal_error, "Failed to set ring for key image in LMDB table: " + std::string(mdb_strerror(dbr)));
 }
 
+static const std::vector<uint64_t>* ring_offsets(const cryptonote::txin_v &in)
+{
+  if (const auto* input = std::get_if<cryptonote::txin_to_key>(&in))
+    return &input->key_offsets;
+  if (const auto* input = std::get_if<cryptonote::txin_zy_input>(&in))
+    return &input->key_offsets;
+  return nullptr;
+}
+
 static int resize_env(MDB_env *env, const fs::path& db_path, size_t needed)
 {
   MDB_envinfo mei;
@@ -272,14 +282,9 @@ bool ringdb::add_rings(const crypto::chacha_key &chacha_key, const cryptonote::t
 
   for (const auto &in: tx.vin)
   {
-    if (!std::holds_alternative<cryptonote::txin_to_key>(in))
-      continue;
-    const auto &txin = var::get<cryptonote::txin_to_key>(in);
-    const uint32_t ring_size = txin.key_offsets.size();
-    if (ring_size == 1)
-      continue;
-
-    store_relative_ring(txn, dbi_rings, txin.k_image, txin.key_offsets, chacha_key);
+    const auto* offsets = ring_offsets(in);
+    if (offsets && offsets->size() > 1)
+      store_relative_ring(txn, dbi_rings, cryptonote::get_input_key_image(in), *offsets, chacha_key);
   }
 
   dbr = mdb_txn_commit(txn);
@@ -331,13 +336,9 @@ bool ringdb::remove_rings(const crypto::chacha_key &chacha_key, const cryptonote
   key_images.reserve(tx.vin.size());
   for (const auto &in: tx.vin)
   {
-    if (!std::holds_alternative<cryptonote::txin_to_key>(in))
-      continue;
-    const auto &txin = var::get<cryptonote::txin_to_key>(in);
-    const uint32_t ring_size = txin.key_offsets.size();
-    if (ring_size == 1)
-      continue;
-    key_images.push_back(txin.k_image);
+    const auto* offsets = ring_offsets(in);
+    if (offsets && offsets->size() > 1)
+      key_images.push_back(cryptonote::get_input_key_image(in));
   }
   return remove_rings(chacha_key, key_images);
 }
