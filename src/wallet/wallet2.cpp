@@ -6903,6 +6903,9 @@ wallet2::token_balances(uint32_t subaddr_index_major, bool strict) const
   for (const auto& td : m_transfers)
   {
     if (td.m_spent)    continue;
+    // Frozen outputs are never selected for spending, so they must not be
+    // reported as balance (matches balance() and token_balances_per_subaddress()).
+    if (td.m_frozen)   continue;
     if (!td.is_zyphora()) continue;
     if (td.m_token_id == crypto::null_tid) continue;
     if (td.m_subaddr_index.major != subaddr_index_major) continue;
