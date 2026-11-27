@@ -14807,6 +14807,29 @@ void wallet2::set_tx_key(const crypto::hash &txid, const crypto::secret_key &tx_
 }
 
 //----------------------------------------------------------------------------------------------------
+namespace {
+  // The parts of a ring-signed input that a spend proof signs over. Native BDX
+  // inputs (txin_to_key) and privacy-token inputs (txin_zy_input) are both
+  // covered: a proof that skipped token inputs would only show ownership of the
+  // BDX inputs paying the fee. Token outputs live in the amount=0 output bucket
+  // keyed by their stealth address, so their ring is fetched with amount 0.
+  struct spend_proof_input
+  {
+    uint64_t amount;
+    const std::vector<uint64_t>& key_offsets;
+    const crypto::key_image& k_image;
+  };
+
+  std::optional<spend_proof_input> get_spend_proof_input(const cryptonote::txin_v& in)
+  {
+    if (const auto* in_key = std::get_if<cryptonote::txin_to_key>(&in))
+      return spend_proof_input{in_key->amount, in_key->key_offsets, in_key->k_image};
+    if (const auto* in_zy = std::get_if<cryptonote::txin_zy_input>(&in))
+      return spend_proof_input{0, in_zy->key_offsets, in_zy->k_image};
+    return std::nullopt;
+  }
+}
+//----------------------------------------------------------------------------------------------------
 std::string wallet2::get_spend_proof(const crypto::hash &txid, std::string_view message)
 {
   THROW_WALLET_EXCEPTION_IF(m_watch_only, error::wallet_internal_error,
@@ -14833,8 +14856,8 @@ std::string wallet2::get_spend_proof(const crypto::hash &txid, std::string_view 
 
   for(size_t i = 0; i < tx.vin.size(); ++i)
   {
-    const txin_to_key* const in_key = std::get_if<txin_to_key>(std::addressof(tx.vin[i]));
-    if (in_key == nullptr)
+    const auto in_key = get_spend_proof_input(tx.vin[i]);
+    if (!in_key)
       continue;
 
     // check if the key image belongs to us
@@ -14933,8 +14956,8 @@ bool wallet2::check_spend_proof(const crypto::hash &txid, std::string_view messa
   size_t num_sigs = 0;
   for(size_t i = 0; i < tx.vin.size(); ++i)
   {
-    const txin_to_key* const in_key = std::get_if<txin_to_key>(std::addressof(tx.vin[i]));
-    if (in_key != nullptr)
+    const auto in_key = get_spend_proof_input(tx.vin[i]);
+    if (in_key)
       num_sigs += in_key->key_offsets.size();
   }
   std::vector<std::vector<crypto::signature>> signatures = { std::vector<crypto::signature>(1) };
@@ -14947,8 +14970,8 @@ bool wallet2::check_spend_proof(const crypto::hash &txid, std::string_view messa
   signatures.clear();
   for(size_t i = 0; i < tx.vin.size(); ++i)
   {
-    const txin_to_key* const in_key = std::get_if<txin_to_key>(std::addressof(tx.vin[i]));
-    if (in_key == nullptr)
+    const auto in_key = get_spend_proof_input(tx.vin[i]);
+    if (!in_key)
       continue;
     signatures.resize(signatures.size() + 1);
     signatures.back().resize(in_key->key_offsets.size());
@@ -14971,8 +14994,8 @@ bool wallet2::check_spend_proof(const crypto::hash &txid, std::string_view messa
   std::vector<std::vector<crypto::signature>>::const_iterator sig_iter = signatures.cbegin();
   for(size_t i = 0; i < tx.vin.size(); ++i)
   {
-    const txin_to_key* const in_key = std::get_if<txin_to_key>(std::addressof(tx.vin[i]));
-    if (in_key == nullptr)
+    const auto in_key = get_spend_proof_input(tx.vin[i]);
+    if (!in_key)
       continue;
 
     // get output pubkeys in the ring
